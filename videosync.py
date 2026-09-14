@@ -22,6 +22,51 @@ def detect_beep(samples, sample_rate, frequency=2700, tolerance=100,
     """
     if not (0 < frequency - tolerance < frequency + tolerance < sample_rate / 2):
         raise ValueError('Frequency band must be above zero and below the Nyquist frequency.')
+    result = scan_tones(samples, sample_rate, [frequency], tolerance, min_beep_duration)
+    if result is None:
+        raise ValueError('No clear sustained beep found; check --frequency, --tolerance or --search-seconds.')
+    return result[0]
+
+
+def detect_beep_auto(samples, sample_rate, tolerance=100, min_beep_duration=0.05):
+    """Return (onset seconds, estimated Hz) for the first tone in 1200–3000 Hz.
+
+    Compute one spectrum, then test narrow candidate bands independently. A
+    wide band alone would also accept speech and broadband impacts.
+    """
+    if not math.isfinite(tolerance) or not 0 < tolerance < 1200:
+        raise ValueError('Automatic detection requires 0 < --tolerance < 1200 Hz.')
+    if 3000 + max(600, tolerance * 3) >= sample_rate / 2:
+        raise ValueError('Sample rate is too low for automatic detection.')
+    result = scan_tones(samples, sample_rate, None, tolerance, min_beep_duration,
+                        frequency_range=(1200, 3000))
+    if result is None:
+        raise ValueError('No clear sustained beep found in 1200–3000 Hz; check --search-seconds or use --frequency HZ.')
+    return result
+
+
+def scan_tones(samples, sample_rate, frequencies, tolerance, min_beep_duration, frequency_range=None):
+    for power, bins, window_size, hop, base in audio_spectrum(samples, sample_rate, min_beep_duration):
+        if frequencies is None:
+            low, high = frequency_range
+            frequencies = bins[(bins >= low) & (bins <= high)]
+        candidates = []
+        for frequency in frequencies:
+            candidates.extend(tone_candidates(power, bins, window_size, hop, sample_rate,
+                                              frequency, tolerance, min_beep_duration,
+                                              frequency_range))
+        # Lookahead resolves tones starting at the end of a batch before we
+        # select its earliest match. Starts in the next batch wait for that batch.
+        candidates = [candidate for candidate in candidates if candidate[0] < 2048]
+        if candidates:
+            frame, _, frequency = min(candidates)
+            frame += base
+            onset = 0.0 if frame == 0 else (frame * hop + window_size / 2) / sample_rate
+            return onset, frequency
+    return None
+
+
+def audio_spectrum(samples, sample_rate, min_beep_duration):
     if min_beep_duration <= 0 or not math.isfinite(min_beep_duration):
         raise ValueError('Minimum beep duration must be positive and finite.')
     samples = np.asarray(samples)
@@ -35,41 +80,58 @@ def detect_beep(samples, sample_rate, frequency=2700, tolerance=100,
         raise ValueError('Audio is too short to detect a beep.')
     window = np.hanning(window_size)
     bins = np.fft.rfftfreq(window_size, 1 / sample_rate)
+    frames = np.lib.stride_tricks.sliding_window_view(samples, window_size, axis=0)[::hop]
+    lookahead = max(1, math.ceil(min_beep_duration * sample_rate / hop))
+    for start in range(0, len(frames), 2048):
+        power = np.abs(np.fft.rfft(frames[start:start + 2048 + lookahead] * window, axis=-1)) ** 2
+        yield power, bins, window_size, hop, start
+
+
+def tone_candidates(power, bins, window_size, hop, sample_rate, frequency,
+                    tolerance, min_beep_duration, frequency_range=None):
     band = np.abs(bins - frequency) <= tolerance
     if not band.any():
         raise ValueError('Frequency tolerance is too narrow for the analysis resolution.')
     neighborhood = np.abs(bins - frequency) <= max(600, tolerance * 3)
-    levels, ratios, local_ratios = [], [], []
-    # Process bounded batches rather than materializing a whole recording's FFT.
-    frames = np.lib.stride_tricks.sliding_window_view(samples, window_size, axis=0)[::hop]
-    for start in range(0, len(frames), 2048):
-        power = np.abs(np.fft.rfft(frames[start:start + 2048] * window, axis=-1)) ** 2
-        band_power = power[..., band].sum(axis=-1)
-        levels.append(band_power)
-        ratios.append(band_power / np.maximum(power.sum(axis=-1), 1e-20))
-        local_ratios.append(band_power / np.maximum(power[..., neighborhood].sum(axis=-1), 1e-20))
-    levels = np.concatenate(levels)
-    ratios = np.concatenate(ratios)
-    local_ratios = np.concatenate(local_ratios)
+    levels = power[..., band].sum(axis=-1)
+    ratios = levels / np.maximum(power.sum(axis=-1), 1e-20)
+    local_ratios = levels / np.maximum(power[..., neighborhood].sum(axis=-1), 1e-20)
     # Use an absolute silence floor and local spectral contrast. A later loud
     # event must not retroactively disqualify an earlier clear tone.
     floor = (1e-4 * window_size) ** 2
     strong = ((levels >= floor) &
               (ratios >= 0.08) & (local_ratios >= 0.65))
+    measured_frequencies = None
+    if frequency_range is not None:
+        peaks = np.flatnonzero(band)[np.argmax(power[..., band], axis=-1)]
+        safe_peaks = np.clip(peaks, 1, len(bins) - 2)
+        # Validate each window's peak, not the average of a whole event: an
+        # adjacent out-of-range tone must never contribute to the beep onset.
+        left, center, right = [np.log(np.maximum(np.take_along_axis(
+            power, (safe_peaks + offset)[..., None], axis=-1)[..., 0], 1e-30))
+            for offset in (-1, 0, 1)]
+        curvature = left - 2 * center + right
+        offsets = np.divide(.5 * (left - right), curvature,
+                            out=np.zeros_like(curvature), where=curvature < -1e-12)
+        measured_frequencies = (peaks + offsets) * sample_rate / window_size
+        low, high = frequency_range
+        strong &= ((peaks == safe_peaks) & (np.abs(offsets) <= .5) &
+                   (measured_frequencies >= low - 1) & (measured_frequencies <= high + 1))
     required = max(1, math.ceil(min_beep_duration * sample_rate / hop))
     candidates = []
-    for channel in range(samples.shape[1]):
+    for channel in range(power.shape[1]):
         mask = strong[:, channel]
         edges = np.diff(np.r_[False, mask, False].astype(np.int8))
         starts, ends = np.flatnonzero(edges == 1), np.flatnonzero(edges == -1)
         for start, end in zip(starts, ends):
             if end - start >= required:
-                # Window center approximates the onset without anchoring to its peak.
-                candidates.append(0.0 if start == 0 else (start * hop + window_size / 2) / sample_rate)
+                measured = frequency
+                if frequency_range is not None:
+                    low, high = frequency_range
+                    measured = float(np.clip(np.median(measured_frequencies[start:end, channel]), low, high))
+                candidates.append((start, -float(local_ratios[start:end, channel].mean()), measured))
                 break
-    if not candidates:
-        raise ValueError('No clear sustained beep found; check --frequency, --tolerance or --search-seconds.')
-    return min(candidates)
+    return candidates
 
 
 def find_ffmpeg(explicit=None):
@@ -193,10 +255,15 @@ def positive_float(value):
     return number
 
 
+def frequency_argument(value):
+    return 'auto' if value.lower() == 'auto' else positive_float(value)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('inputs', nargs='+', type=Path, help='2–4 input videos, in left-to-right order')
-    parser.add_argument('-f', '--frequency', type=positive_float, default=2700, help='Beep frequency in Hz')
+    parser.add_argument('-f', '--frequency', type=frequency_argument, default=2700,
+                        help='Beep frequency in Hz, or auto to search 1200–3000 Hz')
     parser.add_argument('-o', '--output', type=Path, default=Path('synced.mp4'), help='Output MP4')
     parser.add_argument('--pre-roll', type=positive_float, default=1.0, help='Seconds before the beep')
     parser.add_argument('--search-seconds', type=positive_float, default=30.0, help='Seconds to search at the beginning')
@@ -214,7 +281,10 @@ def main(argv=None):
         parser.error('Provide 2–4 input videos.')
     if args.height < 2 or args.height % 2:
         parser.error('--height must be a positive even integer.')
-    if args.frequency > 20000 or args.frequency <= args.tolerance:
+    automatic = args.frequency == 'auto'
+    if automatic and args.tolerance >= 1200:
+        parser.error('Automatic detection requires --tolerance below 1200 Hz.')
+    if not automatic and (args.frequency > 20000 or args.frequency <= args.tolerance):
         parser.error('--frequency must exceed --tolerance and be at most 20000 Hz.')
     for path in args.inputs:
         if not path.is_file():
@@ -230,17 +300,22 @@ def main(argv=None):
             parser.error('Output already exists; use --overwrite to replace it.')
     try:
         ffmpeg = find_ffmpeg(args.ffmpeg)
-        rate = max(16000, math.ceil((args.frequency + args.tolerance + 1000) * 2))
+        rate = (max(16000, math.ceil((3000 + max(600, args.tolerance * 3) + 1000) * 2))
+                if automatic else max(16000, math.ceil((args.frequency + args.tolerance + 1000) * 2)))
         beeps = []
         for path in args.inputs:
             print(f'Analyzing {path} ...', flush=True)
             samples = decode_audio(ffmpeg, path, args.search_seconds, rate)
             try:
-                beep = detect_beep(samples, rate, args.frequency, args.tolerance, args.min_beep_duration)
+                if automatic:
+                    beep, frequency = detect_beep_auto(samples, rate, args.tolerance, args.min_beep_duration)
+                else:
+                    beep = detect_beep(samples, rate, args.frequency, args.tolerance, args.min_beep_duration)
+                    frequency = args.frequency
             except ValueError as exc:
                 raise ValueError(f'{path}: {exc}') from exc
             beeps.append(beep)
-            print(f'  beep={beep:.3f}s  trim={max(0, beep - args.pre_roll):.3f}s'
+            print(f'  beep={beep:.3f}s  frequency={frequency:.0f}Hz  trim={max(0, beep - args.pre_roll):.3f}s'
                   f'  pad={max(0, args.pre_roll - beep):.3f}s', flush=True)
         if not args.detect_only:
             render(ffmpeg, args.inputs, beeps, args.output, pre_roll=args.pre_roll,

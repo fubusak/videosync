@@ -31,6 +31,7 @@ uses the local `.venv` and forwards its arguments.
 ```sh
 python videosync.py first.mp4 second.mp4 -o synced.mp4
 python videosync.py first.mp4 second.mp4 --frequency 2700 -o synced.mp4
+python videosync.py first.mp4 second.mp4 --frequency auto --audio mix -o automatic.mp4
 python videosync.py a.mp4 b.mp4 c.mp4 d.mp4 --audio mix -o four.mp4
 python videosync.py first.mp4 second.mp4 --detect-only
 ```
@@ -38,9 +39,14 @@ python videosync.py first.mp4 second.mp4 --detect-only
 Frequency is in **Hz**: 2.7 kHz is `2700`. Decimal commas are accepted in numeric
 arguments (e.g. `--pre-roll 1,5` means 1.5 seconds).
 
+Use **`--frequency auto`** to detect any stable beep within **1200–3000 Hz**,
+including the endpoints. Each input is analyzed independently and the detected
+frequency is printed alongside its onset, so the recordings can use different
+beep frequencies. Without this option, the default remains 2700 Hz.
+
 | Option | Default | Purpose |
 | --- | --- | --- |
-| `-f`, `--frequency` | `2700` | Beep frequency in Hz |
+| `-f`, `--frequency` | `2700` | Beep frequency in Hz, or `auto` for 1200–3000 Hz |
 | `-o`, `--output` | `synced.mp4` | Output MP4 path |
 | `--pre-roll` | `1` | Seconds before the detected beep |
 | `--search-seconds` | `30` | Search this many seconds from each input's start |
@@ -77,6 +83,12 @@ The supplied recordings have a prominent tone near **1500 Hz**, rather than
 The detector found 1.265 s and 0.350 s respectively, resulting in 0.265 s of
 trimming on the first video and 0.650 s of initial padding on the second.
 
+Automatic mode finds approximately 1506 Hz and 1502 Hz at the same onsets:
+
+```powershell
+.\videosync.cmd PXL_20260913_124051052.TS.mp4 PXL_20260913_125101103.TS.mp4 --frequency auto --audio mix -o synced-auto.mp4
+```
+
 ## Detection and limitations
 
 The detector uses 20 ms Hann-windowed FFTs with 5 ms hops. It checks tone
@@ -86,13 +98,23 @@ phase cancellation. FFmpeg preserves stream timestamp offsets while decoding
 and rendering. See the [FFmpeg filter documentation](https://ffmpeg.org/ffmpeg-filters.html)
 for the stacking, trimming and padding filters used here.
 
+Automatic mode processes bounded FFT batches and reuses each batch for narrow
+candidate bands throughout the search range. It checks the dominant frequency
+in every window by interpolating the spectral peak, rejecting tones outside
+the range rather than treating every
+sound in one broad band as a beep. The frequency estimate is approximate;
+there is a 1 Hz numerical margin at the boundaries. `--tolerance` controls
+the candidate band width and does not expand the automatic search range.
+
 The timing is approximate: output video alignment is limited to the selected
 frame rate, and noise masking the tone's attack can delay the detected onset.
 Synthetic clear-tone tests allow 15 ms detection error and 25 ms after AAC
 encoding. These are test tolerances, not an accuracy guarantee for noisy
 recordings. This aligns the starting beep; it does not correct clock drift
 over long recordings. An earlier sustained sound at the same frequency may
-be mistaken for the intended beep. If no clear tone is found, the CLI fails
+be mistaken for the intended beep. In automatic mode this also applies to an
+earlier stable tone anywhere in the search range; specify the known frequency
+to narrow the search when needed. If no clear tone is found, the CLI fails
 instead of silently guessing; check frequency or increase the search window.
 
 ## Tests

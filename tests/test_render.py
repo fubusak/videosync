@@ -89,6 +89,15 @@ class RenderTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(output.exists())
 
+    def test_cli_auto_reports_frequency_and_renders_mixed_audio(self):
+        output = self.root / 'automatic.mp4'
+        result = self.cli(self.inputs[:2], '--frequency', 'auto', '--audio', 'mix', '-o', output)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('frequency=2700', result.stdout)
+        samples = decode_audio(self.ffmpeg, output, 3, 16000)
+        self.assertAlmostEqual(detect_beep(samples, 16000), 1, delta=.025)
+        self.assertTrue(np.all(self.frame(output, 1.08, 2)[45, 80] > 225))
+
     def test_rejects_beep_after_video_ends(self):
         source = self.root / 'audio outlasts video.mp4'
         subprocess.run([self.ffmpeg, '-v', 'error', '-y', '-f', 'lavfi', '-i',
