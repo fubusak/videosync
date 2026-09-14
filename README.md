@@ -1,9 +1,10 @@
 # VideoSync
 
 Synchronize **2–4 videos using a beep**, then render them horizontally in input
-order. The recordings can show entirely different events. The CLI detects the
-first sustained tone near the chosen frequency and places it approximately one
-second into the output.
+order. The recordings can show entirely different events, but the batch is
+assumed to use the **same kind of starting beep: similar frequency and duration**.
+The CLI selects a consistent beep across all inputs and places its detected
+onset approximately one second into the output.
 
 ## Installation
 
@@ -40,9 +41,15 @@ Frequency is in **Hz**: 2.7 kHz is `2700`. Decimal commas are accepted in numeri
 arguments (e.g. `--pre-roll 1,5` means 1.5 seconds).
 
 Use **`--frequency auto`** to detect any stable beep within **1200–3000 Hz**,
-including the endpoints. Each input is analyzed independently and the detected
-frequency is printed alongside its onset, so the recordings can use different
-beep frequencies. Without this option, the default remains 2700 Hz.
+including the endpoints. The CLI retains candidates in every recording, then
+compares their frequencies and durations across the whole batch. It prints
+each selected onset, measured frequency and observed duration. Without this
+option, the default remains 2700 Hz; batch consistency also applies in fixed
+frequency mode.
+
+Matching requires a candidate in **every** video. If the frequencies or
+durations disagree, the CLI reports an error instead of rendering unrelated
+beeps. `--detect-only` performs this same batch check without rendering.
 
 | Option | Default | Purpose |
 | --- | --- | --- |
@@ -91,6 +98,19 @@ Automatic mode finds approximately 1506 Hz and 1502 Hz at the same onsets:
 
 ## Detection and limitations
 
+Batch matching uses a maximum 40 Hz frequency spread. Observed durations
+normally must agree within 30% of the longest beep, or 40 ms for short beeps.
+The earliest compatible group wins; frequency/duration agreement and signal
+quality resolve ties at the same combined onset time.
+
+Shooting can hide pieces of a beep, so observed duration is not always its
+physical duration. A clear candidate in another file can support joining
+same-frequency noisy fragments with gaps up to 300 ms, provided their full
+span matches its duration. A noisy candidate may be up to 40% shorter than a
+clear reference. The implementation uses a spectral-concentration score of
+0.9 to distinguish clear references; this is a heuristic, not a calibrated
+probability. These checks never invent an earlier onset or stretch playback.
+
 The detector uses 20 ms Hann-windowed FFTs with 5 ms hops. It checks tone
 strength and concentration relative to neighboring frequencies, requires a
 sustained detection, and analyzes stereo channels independently to avoid
@@ -106,16 +126,32 @@ sound in one broad band as a beep. The frequency estimate is approximate;
 there is a 1 Hz numerical margin at the boundaries. `--tolerance` controls
 the candidate band width and does not expand the automatic search range.
 
+If shooting or microphone overload masks the fundamental, automatic mode can
+also infer it from matching **second and third harmonics**. Both must be
+present at the same time in the same channel, persist for the minimum beep
+duration, and imply the same fundamental (within 15 Hz). A single harmonic or
+broadband impact is insufficient. Automatic CLI analysis uses 24 kHz audio
+to retain the harmonics of fundamentals up to 3000 Hz. Direct Python calls
+using lower sample rates can only use harmonics below their Nyquist limit.
+
+For the local `hopacka_m.mp4` / `houpacka_v.mp4` recordings, this finds the start
+beeps at **1.190 s** and **3.700 s**, respectively, near 1507 Hz. Previously the
+second clip's masked fundamental was missed and a later unrelated tone was
+selected. Create the corrected comparison with:
+
+```powershell
+.\videosync.cmd hopacka_m.mp4 houpacka_v.mp4 --frequency auto --audio mix -o houpacka-fixed.mp4
+```
+
 The timing is approximate: output video alignment is limited to the selected
 frame rate, and noise masking the tone's attack can delay the detected onset.
 Synthetic clear-tone tests allow 15 ms detection error and 25 ms after AAC
 encoding. These are test tolerances, not an accuracy guarantee for noisy
 recordings. This aligns the starting beep; it does not correct clock drift
-over long recordings. An earlier sustained sound at the same frequency may
-be mistaken for the intended beep. In automatic mode this also applies to an
-earlier stable tone anywhere in the search range; specify the known frequency
-to narrow the search when needed. If no clear tone is found, the CLI fails
-instead of silently guessing; check frequency or increase the search window.
+over long recordings. If several sounds have matching frequency and duration
+in every file, the earliest compatible group can still be the wrong event;
+specify the known frequency or shorten the search window when needed. If no
+consistent group exists, the CLI fails; check the inputs and search settings.
 
 ## Tests
 
@@ -123,6 +159,9 @@ instead of silently guessing; check frequency or increase the search window.
 python -m unittest discover -s tests -v
 ```
 
-Tests cover synthetic tones, noise, harmonics, opposite stereo phase, missing
+Tests cover synthetic tones, noise, masked fundamentals, clipped impacts,
+matching and mismatched harmonics, batch frequency/duration disagreements,
+earlier distractors, masked fragments, opposite stereo phase, missing
 tones, input protection, and real FFmpeg renders of 2–4 clips with known audio
-beeps and visual flashes. No supplied recordings are needed for the tests.
+beeps and visual flashes. The houpacka regression runs when those two local
+recordings are available and skips otherwise; recordings are not stored in Git.

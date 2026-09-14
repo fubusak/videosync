@@ -100,6 +100,42 @@ class DetectionTests(unittest.TestCase):
         self.assertAlmostEqual(onset, 10.237, delta=.015)
         self.assertAlmostEqual(frequency, 2173, delta=15)
 
+    def test_auto_recovers_masked_fundamental_from_two_harmonics(self):
+        rng = np.random.default_rng(84)
+        samples = np.clip(rng.normal(0, .2, self.rate * 4), -.4, .4)
+        samples += .6 * self.signal(frequency=3020, noise=0)
+        samples += .6 * self.signal(frequency=4530, noise=0)
+        onset, frequency = detect_beep_auto(samples, self.rate)
+        self.assertAlmostEqual(onset, 1.237, delta=.02)
+        self.assertAlmostEqual(frequency, 1510, delta=15)
+
+    def test_auto_requires_matching_simultaneous_harmonics(self):
+        cases = [self.signal(frequency=3020),
+                 self.signal(frequency=3020) + self.signal(frequency=4400),
+                 self.signal(frequency=3020) + self.signal(frequency=4530, onset=2)]
+        for samples in cases:
+            with self.subTest():
+                with self.assertRaises(ValueError):
+                    detect_beep_auto(samples, self.rate)
+
+    def test_auto_rejects_clipped_impacts_without_a_beep(self):
+        rng = np.random.default_rng(182)
+        samples = np.zeros(self.rate * 4)
+        for onset in [.1, .7, 1.3, 2.0, 2.4, 3.1]:
+            start = round(onset * self.rate)
+            decay = np.exp(-np.arange(6000) / 1200)
+            samples[start:start + 6000] += np.clip(5 * rng.normal(size=6000) * decay, -.8, .8)
+        with self.assertRaises(ValueError):
+            detect_beep_auto(samples, self.rate)
+
+    def test_harmonic_beep_between_candidates_with_narrow_tolerance(self):
+        samples = self.signal(onset=.2, frequency=3050, noise=0)
+        samples += self.signal(onset=.2, frequency=4575, noise=0)
+        samples += self.signal(onset=.7, frequency=2700, noise=0)
+        onset, frequency = detect_beep_auto(samples, self.rate, tolerance=50)
+        self.assertAlmostEqual(onset, .2, delta=.02)
+        self.assertAlmostEqual(frequency, 1525, delta=15)
+
 
 if __name__ == '__main__':
     unittest.main()
