@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from pathlib import Path
 import shutil
 import subprocess
@@ -15,6 +16,8 @@ MAX_FILES = 4
 MIN_FILES = 2
 MAX_FILE_BYTES = 100 * 1024 * 1024
 MAX_TOTAL_BYTES = 300 * 1024 * 1024
+MAX_DURATION_SECONDS = 120.0
+MAX_DIMENSION_PIXELS = 3840
 ALLOWED_SUFFIXES = {".mp4", ".mov"}
 DEFAULT_JOB_PREFIX = "videosync-"
 
@@ -46,6 +49,15 @@ class JobResult:
     stdout: str
     stderr: str
     command: list[str]
+
+
+@dataclass(frozen=True)
+class MediaInfo:
+    duration: float
+    width: int
+    height: int
+    has_video: bool
+    has_audio: bool
 
 
 def _job_root(job_root: Path | None = None) -> Path:
@@ -107,12 +119,72 @@ def _write_uploads(job_dir: Path, uploads) -> list[Path]:
     return paths
 
 
+def probe_media(path: Path, *, runner=subprocess.run) -> MediaInfo:
+    command = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-print_format",
+        "json",
+        "-show_streams",
+        "-show_format",
+        str(path),
+    ]
+    completed = runner(command, capture_output=True, text=True)
+    if completed.returncode != 0:
+        raise ValueError("Could not read the uploaded video.")
+    try:
+        metadata = json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        raise ValueError("Could not read the uploaded video metadata.") from exc
+    return media_info_from_probe(metadata)
+
+
+def media_info_from_probe(metadata) -> MediaInfo:
+    streams = metadata.get("streams", [])
+    video = next((stream for stream in streams if stream.get("codec_type") == "video"), None)
+    has_audio = any(stream.get("codec_type") == "audio" for stream in streams)
+    duration = _duration_from_metadata(metadata, video)
+    return MediaInfo(
+        duration=duration,
+        width=int(video.get("width", 0)) if video else 0,
+        height=int(video.get("height", 0)) if video else 0,
+        has_video=video is not None,
+        has_audio=has_audio,
+    )
+
+
+def _duration_from_metadata(metadata, video) -> float:
+    for value in [
+        metadata.get("format", {}).get("duration"),
+        video.get("duration") if video else None,
+    ]:
+        if value not in (None, "N/A"):
+            try:
+                return float(value)
+            except ValueError:
+                pass
+    return 0.0
+
+
+def validate_media_constraints(media: MediaInfo, path: Path) -> None:
+    if not media.has_video:
+        raise ValueError(f"{path.name}: video stream is missing.")
+    if not media.has_audio:
+        raise ValueError(f"{path.name}: audio stream is missing.")
+    if media.duration > MAX_DURATION_SECONDS:
+        raise ValueError(f"{path.name}: video is longer than 2 minutes.")
+    if media.width > MAX_DIMENSION_PIXELS or media.height > MAX_DIMENSION_PIXELS:
+        raise ValueError(f"{path.name}: video dimensions exceed 3840 pixels.")
+
+
 def run_sync_job(
     uploads,
     options: SyncOptions,
     *,
     job_root: Path | None = None,
     runner=subprocess.run,
+    prober=probe_media,
     script_path: Path | None = None,
 ) -> JobResult:
     validate_uploads(uploads)
@@ -123,6 +195,8 @@ def run_sync_job(
     try:
         job_dir.mkdir(parents=True)
         inputs = _write_uploads(job_dir, uploads)
+        for path in inputs:
+            validate_media_constraints(prober(path), path)
         output = job_dir / "synced.mp4"
         command = build_command(script_path or Path(__file__).with_name("videosync.py"), inputs, output, options)
         completed = runner(command, capture_output=True, text=True, timeout=options.timeout_seconds)
