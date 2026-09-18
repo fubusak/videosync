@@ -290,7 +290,9 @@ def render(ffmpeg, files, beeps, output, *, pre_roll=1, height=720, fps=30,
         if beep >= endpoint:
             raise ValueError(f'{path}: detected beep lies beyond the video endpoint ({endpoint:.3f}s).')
         remaining.append(endpoint - beep + pre_roll)
-    output_duration = min(remaining + ([duration] if duration is not None else []))
+    output_duration = max(remaining)
+    if duration is not None:
+        output_duration = min(output_duration, duration)
     if output_duration < 1 / fps:
         raise ValueError('Output duration must contain at least one video frame.')
     command = [ffmpeg, '-hide_banner', '-loglevel', 'warning', '-stats', '-nostdin',
@@ -304,7 +306,8 @@ def render(ffmpeg, files, beeps, output, *, pre_roll=1, height=720, fps=30,
             f'[{i}:v:0]trim=start={trim:.9f},setpts=PTS-{trim:.9f}/TB,'
             f'scale=w=trunc(oh*dar/2)*2:h={height},setsar=1,'
             f'fps=fps={fps}:start_time=0,format=yuv420p,'
-            f'tpad=start_mode=clone:start_duration={pad:.9f}[v{i}]')
+            f'tpad=start_mode=clone:start_duration={pad:.9f}:'
+            f'stop_mode=add:color=black:stop_duration={output_duration:.9f}[v{i}]')
         if audio == 'mix' or (audio == 'first' and i == 0):
             delay_samples = round(pad * 48000)
             filters.append(

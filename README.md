@@ -27,6 +27,24 @@ in PowerShell or `source .venv/bin/activate` on macOS/Linux), or replace `python
 with the environment's Python path. On Windows, `videosync.cmd` automatically
 uses the local `.venv` and forwards its arguments.
 
+## Web Docker image
+
+Build the private web MVP image:
+
+```sh
+docker build -t videosync-web:dev .
+```
+
+Run it locally with a shared beta password:
+
+```sh
+docker run --rm -p 8501:8501 -e VIDEOSYNC_PASSWORD=change-me videosync-web:dev
+```
+
+Then open `http://localhost:8501`. The container includes FFmpeg and runs the
+Streamlit app entrypoint; upload and synchronization controls are being added
+behind this image.
+
 ## Usage
 
 ```sh
@@ -62,7 +80,7 @@ beeps. `--detect-only` performs this same batch check without rendering.
 | `--audio` | `first` | First recording, `mix` all recordings, or `none` |
 | `--height` | `720` | Common video height; positive even number |
 | `--fps` | `30` | Output frame rate |
-| `--duration` | shortest aligned video | Limit output length, useful for previews |
+| `--duration` | longest aligned video | Limit output length, useful for previews |
 | `--detect-only` | off | Print beep and trim/padding times without rendering |
 | `--overwrite` | off | Allow replacing an existing output |
 | `--ffmpeg` | auto | Explicit FFmpeg executable |
@@ -73,8 +91,9 @@ stream with `--audio none`). Video aspect ratios are preserved at a common
 height. Output width is the sum of the scaled video widths.
 
 When a beep occurs before the requested pre-roll, the CLI adds a frozen first
-frame and silence. It stops at the shortest aligned video; a duration limit can
-end it sooner. Input files are never overwritten, including with `--overwrite`.
+frame and silence. It runs until the longest aligned video ends, turning each
+shorter video's panel black when it finishes. A duration limit can end it sooner.
+Input files are never overwritten, including with `--overwrite`.
 Rendering errors or cancellation may leave a partial output; rerun with a new
 output name or `--overwrite`.
 

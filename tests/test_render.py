@@ -7,7 +7,7 @@ import unittest
 
 import numpy as np
 
-from videosync import decode_audio, detect_beep, find_ffmpeg
+from videosync import decode_audio, detect_beep, find_ffmpeg, video_endpoint
 
 
 class RenderTests(unittest.TestCase):
@@ -46,8 +46,8 @@ class RenderTests(unittest.TestCase):
                                 check=True, capture_output=True)
         return np.frombuffer(result.stdout, np.uint8).reshape(90, count * 160, 3)
 
-    def test_two_to_four_videos_align_and_stop_at_shortest(self):
-        for count, audio, expected_duration in [(2, 'first', 3.6), (3, 'mix', 3.6), (4, 'none', 3.1)]:
+    def test_two_to_four_videos_align_and_stop_at_longest(self):
+        for count, audio, expected_duration in [(2, 'first', 3.6), (3, 'mix', 3.6), (4, 'none', 3.6)]:
             with self.subTest(count=count, audio=audio):
                 output = self.root / f'output{count}.mp4'
                 result = self.cli(self.inputs[:count], '-o', output, '--audio', audio)
@@ -69,6 +69,33 @@ class RenderTests(unittest.TestCase):
                 metadata = next(frames)
                 frames.close()
                 self.assertAlmostEqual(metadata['duration'], expected_duration, delta=.1)
+
+    def test_finished_panel_turns_black_until_longer_video_ends(self):
+        for short_first in (True, False):
+            for audio in ('first', 'mix', 'none'):
+                with self.subTest(short_first=short_first, audio=audio):
+                    inputs = [self.inputs[3], self.inputs[1]]
+                    if not short_first:
+                        inputs.reverse()
+                    output = self.root / f'black-{short_first}-{audio}.mp4'
+                    result = self.cli(inputs, '-o', output, '--audio', audio)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertAlmostEqual(video_endpoint(self.ffmpeg, output), 3.6, delta=.05)
+                    short_x, long_x = (80, 240) if short_first else (240, 80)
+                    before = self.frame(output, 3.0, 2)
+                    self.assertTrue(np.any(before[45, short_x] > 100))
+                    after = self.frame(output, 3.4, 2)
+                    self.assertTrue(np.all(after[45, short_x] < 10))
+                    self.assertGreater(after[45, long_x, 1], 100)
+
+    def test_duration_limit_still_caps_longest_video(self):
+        for limit in (2, 3.3, 5):
+            with self.subTest(limit=limit):
+                output = self.root / f'limited-{limit}.mp4'
+                result = self.cli([self.inputs[3], self.inputs[1]], '-o', output,
+                                  '--duration', limit)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertAlmostEqual(video_endpoint(self.ffmpeg, output), min(limit, 3.6), delta=.05)
 
     def test_cli_rejects_bad_input_count_and_invalid_numbers(self):
         for inputs, flags in [(self.inputs[:1], []), (self.inputs * 2, []),
