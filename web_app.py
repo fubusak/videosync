@@ -1,5 +1,6 @@
 import hmac
 import os
+from pathlib import PureWindowsPath
 
 import streamlit as st
 
@@ -80,8 +81,11 @@ def _run_sync(uploads, audio, frequency):
     try:
         with st.spinner("Analyzing beeps and rendering..."):
             result = web_jobs.run_sync_job(videos, options)
+            result_bytes = result.output_path.read_bytes()
+            result_filename = "vs_" + "_".join(PureWindowsPath(video.name).stem for video in videos) + ".mp4"
             st.session_state.job_result = result
-            st.session_state.result_bytes = result.output_path.read_bytes()
+            st.session_state.result_bytes = result_bytes
+            st.session_state.result_filename = result_filename
         st.success("Sync complete.")
     except (RuntimeError, TimeoutError, ValueError, OSError) as exc:
         st.error(str(exc))
@@ -97,7 +101,7 @@ def _render_result():
     st.download_button(
         "Download MP4",
         data=result_bytes,
-        file_name="videosync.mp4",
+        file_name=st.session_state.get("result_filename", "videosync.mp4"),
         mime="video/mp4",
         on_click="ignore",
     )
@@ -105,6 +109,7 @@ def _render_result():
         web_jobs.clear_job(st.session_state.get("job_result"))
         st.session_state.pop("job_result", None)
         st.session_state.pop("result_bytes", None)
+        st.session_state.pop("result_filename", None)
         st.rerun()
 
 
