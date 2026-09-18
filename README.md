@@ -42,7 +42,10 @@ docker run --rm -p 8501:8501 -e VIDEOSYNC_PASSWORD=change-me videosync-web:dev
 ```
 
 Then open `http://localhost:8501` and sign in with the configured password.
-Upload 2–4 MP4 or MOV clips in left-to-right order, choose the audio source
+Choose one MP4 or MOV clip in each numbered upload field. Video 1 and Video 2
+are required; Video 3 and Video 4 are optional. The numbers determine the
+left-to-right output order, so mobile users can select clips individually.
+Choose the audio source
 and automatic or known beep frequency, then select **Sync videos**. The app
 provides an MP4 preview and download after rendering.
 

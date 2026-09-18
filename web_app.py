@@ -43,11 +43,17 @@ def _render_shell():
     st.caption("Private beta")
     st.info("Upload 2-4 MP4 or MOV clips with the same starting beep. Keep this page open while rendering; results expire after one hour.")
 
-    uploads = st.file_uploader(
-        "Videos in left-to-right order",
-        type=["mp4", "mov"],
-        accept_multiple_files=True,
-    )
+    st.caption("Choose one clip per field. Video numbers set the left-to-right output order.")
+    slots = [
+        st.file_uploader(
+            f"Video {index}" + (" (optional)" if index > 2 else ""),
+            type=["mp4", "mov"],
+            accept_multiple_files=False,
+            key=f"video_{index}",
+        )
+        for index in range(1, 5)
+    ]
+    uploads = [upload for upload in slots if upload is not None]
     if uploads:
         st.write("Output order:")
         for index, upload in enumerate(uploads, start=1):
@@ -59,8 +65,11 @@ def _render_shell():
     if frequency_mode == "Known Hz":
         frequency = str(st.number_input("Frequency", min_value=1, max_value=20000, value=2700, step=1))
 
-    if st.button("Sync videos", type="primary"):
-        _run_sync(uploads or [], AUDIO_CHOICES[audio_label], frequency)
+    ready = slots[0] is not None and slots[1] is not None
+    if not ready:
+        st.caption("Add Video 1 and Video 2 to start syncing.")
+    if st.button("Sync videos", type="primary", disabled=not ready):
+        _run_sync(uploads, AUDIO_CHOICES[audio_label], frequency)
 
     _render_result()
 
