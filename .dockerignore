@@ -1,6 +1,9 @@
 .git
 .agents
 .codex
+.env
+.env.*
+.streamlit/secrets.toml
 .venv
 .deps
 __pycache__
@@ -17,6 +20,7 @@ __pycache__
 *.wav
 *.m4a
 *.aac
+*.png
 *.tmp
 rendered-*.mp4
 docs/superpowers/plans

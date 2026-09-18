@@ -41,9 +41,21 @@ Run it locally with a shared beta password:
 docker run --rm -p 8501:8501 -e VIDEOSYNC_PASSWORD=change-me videosync-web:dev
 ```
 
-Then open `http://localhost:8501`. The container includes FFmpeg and runs the
-Streamlit app entrypoint; upload and synchronization controls are being added
-behind this image.
+Then open `http://localhost:8501` and sign in with the configured password.
+Upload 2–4 MP4 or MOV clips in left-to-right order, choose the audio source
+and automatic or known beep frequency, then select **Sync videos**. The app
+provides an MP4 preview and download after rendering.
+
+Each clip must contain video and audio, be at most 100 MiB and two minutes
+long, and have neither dimension exceed 3840 pixels. Combined uploads are
+limited to 300 MiB. The app processes one job at a time per server process,
+with a ten-minute rendering timeout. Temporary job files older than one hour
+are cleaned up when the app next renders its upload page; **Clear result**
+removes the current result and its job files.
+
+The container includes FFmpeg and ffprobe. For a local web launch, install
+`requirements-web.txt`, make both executables available on PATH, set
+`VIDEOSYNC_PASSWORD`, and run `python -m streamlit run web_app.py`.
 
 ## Usage
 
@@ -97,9 +109,10 @@ Input files are never overwritten, including with `--overwrite`.
 Rendering errors or cancellation may leave a partial output; rerun with a new
 output name or `--overwrite`.
 
-## Included recordings
+## Local example recordings
 
-The supplied recordings have a prominent tone near **1500 Hz**, rather than
+The local example recordings are not included in this repository. They have
+a prominent tone near **1500 Hz**, rather than
 2700 Hz. The rendered `synced.mp4` was made with:
 
 ```powershell
