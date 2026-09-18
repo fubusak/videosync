@@ -60,7 +60,7 @@ def _render_shell():
         for index, upload in enumerate(uploads, start=1):
             st.write(f"{index}. {upload.name}")
 
-    audio_label = st.selectbox("Audio", list(AUDIO_CHOICES), index=0)
+    audio_label = st.selectbox("Audio", list(AUDIO_CHOICES), index=1)
     frequency_mode = st.radio("Beep frequency", ["Auto detect", "Known Hz"], horizontal=True)
     frequency = "auto"
     if frequency_mode == "Known Hz":
