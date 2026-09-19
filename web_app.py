@@ -53,6 +53,7 @@ def _render_shell():
             f"Video {index}" + (" (optional)" if index > 2 else ""),
             type=["mp4", "mov"],
             accept_multiple_files=False,
+            max_upload_size=web_jobs.MAX_FILE_BYTES // (1024 * 1024),
             key=f"video_{index}",
         )
         for index in range(1, 5)

@@ -17,6 +17,16 @@ from web_jobs import (
 )
 
 
+class SizedUploadData:
+    """Exercise size validation without allocating gigabytes of test data."""
+
+    def __init__(self, size):
+        self.size = size
+
+    def __len__(self):
+        return self.size
+
+
 class WebJobTests(unittest.TestCase):
     def upload(self, name="clip.mp4", data=b"video"):
         return UploadedVideo(name, data)
@@ -30,9 +40,15 @@ class WebJobTests(unittest.TestCase):
             validate_uploads([self.upload("clip.txt"), self.upload("clip.mp4")])
         with self.assertRaises(ValueError):
             validate_uploads([
-                self.upload("a.mp4", b"x" * (100 * 1024 * 1024 + 1)),
+                self.upload("a.mp4", SizedUploadData(500 * 1024 * 1024 + 1)),
                 self.upload("b.mp4"),
             ])
+
+    def test_accepts_four_videos_at_500_mib_each(self):
+        validate_uploads([
+            self.upload(f"{i}.mp4", SizedUploadData(500 * 1024 * 1024))
+            for i in range(4)
+        ])
 
     def test_build_command_uses_argument_list_with_expected_defaults(self):
         command = build_command(

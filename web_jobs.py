@@ -14,8 +14,8 @@ import uuid
 
 MAX_FILES = 4
 MIN_FILES = 2
-MAX_FILE_BYTES = 100 * 1024 * 1024
-MAX_TOTAL_BYTES = 300 * 1024 * 1024
+MAX_FILE_BYTES = 500 * 1024 * 1024
+MAX_TOTAL_BYTES = MAX_FILES * MAX_FILE_BYTES
 MAX_DURATION_SECONDS = 120.0
 MAX_DIMENSION_PIXELS = 3840
 ALLOWED_SUFFIXES = {".mp4", ".mov"}
@@ -80,11 +80,11 @@ def validate_uploads(uploads) -> None:
             raise ValueError("Use MP4 or MOV files.")
         size = len(upload.data)
         if size > MAX_FILE_BYTES:
-            raise ValueError("Each video must be 100 MB or smaller.")
+            raise ValueError("Each video must be 500 MB or smaller.")
         total += size
 
     if total > MAX_TOTAL_BYTES:
-        raise ValueError("The combined upload must be 300 MB or smaller.")
+        raise ValueError("The combined upload must be 2000 MB or smaller.")
 
 
 def build_command(script_path: Path, inputs, output: Path, options: SyncOptions) -> list[str]:

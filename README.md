@@ -50,9 +50,9 @@ Choose the audio source
 and automatic or known beep frequency, then select **Sync videos**. The app
 provides an MP4 preview and download after rendering.
 
-Each clip must contain video and audio, be at most 100 MiB and two minutes
+Each clip must contain video and audio, be at most 500 MiB and two minutes
 long, and have neither dimension exceed 3840 pixels. Combined uploads are
-limited to 300 MiB. The app processes one job at a time per server process,
+limited to 2000 MiB. The app processes one job at a time per server process,
 with a ten-minute rendering timeout. Temporary job files older than one hour
 are cleaned up when the app next renders its upload page; **Clear result**
 removes the current result and its job files.
