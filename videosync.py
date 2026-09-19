@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Synchronize 2–4 videos by a tone and render them in a horizontal row."""
+"""Synchronize 2–4 videos by a tone and render them in a row or column."""
 
 import argparse
 import math
@@ -281,7 +281,11 @@ def video_endpoint(ffmpeg, path):
 
 
 def render(ffmpeg, files, beeps, output, *, pre_roll=1, height=720, fps=30,
-           audio='first', duration=None, overwrite=False):
+           audio='first', duration=None, overwrite=False, layout='horizontal', width=720):
+    if layout not in ('horizontal', 'vertical'):
+        raise ValueError('Layout must be horizontal or vertical.')
+    scale = (f'scale=w=trunc(oh*dar/2)*2:h={height}' if layout == 'horizontal'
+             else f'scale=w={width}:h=trunc(ow/dar/2)*2')
     # Bound padding explicitly: an infinite apad can stall a multi-input graph
     # before FFmpeg's output-level -shortest gets a chance to terminate it.
     remaining = []
@@ -304,7 +308,7 @@ def render(ffmpeg, files, beeps, output, *, pre_roll=1, height=720, fps=30,
         trim, pad = max(0, beep - pre_roll), max(0, pre_roll - beep)
         filters.append(
             f'[{i}:v:0]trim=start={trim:.9f},setpts=PTS-{trim:.9f}/TB,'
-            f'scale=w=trunc(oh*dar/2)*2:h={height},setsar=1,'
+            f'{scale},setsar=1,'
             f'fps=fps={fps}:start_time=0,format=yuv420p,'
             f'tpad=start_mode=clone:start_duration={pad:.9f}:'
             f'stop_mode=add:color=black:stop_duration={output_duration:.9f}[v{i}]')
@@ -316,7 +320,7 @@ def render(ffmpeg, files, beeps, output, *, pre_roll=1, height=720, fps=30,
                 f'adelay=delays={delay_samples}S:all=1[a{i}]')
             audio_labels.append(f'[a{i}]')
     filters.append(''.join(f'[v{i}]' for i in range(len(files))) +
-                   f'hstack=inputs={len(files)}:shortest=1[vout]')
+                   f'{"hstack" if layout == "horizontal" else "vstack"}=inputs={len(files)}:shortest=1[vout]')
     if audio_labels:
         if audio == 'mix':
             filters.append(''.join(audio_labels) +
@@ -355,7 +359,7 @@ def frequency_argument(value):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument('inputs', nargs='+', type=Path, help='2–4 input videos, in left-to-right order')
+    parser.add_argument('inputs', nargs='+', type=Path, help='2–4 input videos, in left-to-right or top-to-bottom order')
     parser.add_argument('-f', '--frequency', type=frequency_argument, default=2700,
                         help='Beep frequency in Hz, or auto to search 1200–3000 Hz')
     parser.add_argument('-o', '--output', type=Path, default=Path('synced.mp4'), help='Output MP4')
@@ -363,7 +367,9 @@ def main(argv=None):
     parser.add_argument('--search-seconds', type=positive_float, default=30.0, help='Seconds to search at the beginning')
     parser.add_argument('--tolerance', type=positive_float, default=100.0, help='Frequency tolerance in Hz, plus/minus')
     parser.add_argument('--min-beep-duration', type=positive_float, default=0.05, help='Minimum sustained tone in seconds')
-    parser.add_argument('--height', type=int, default=720, help='Output height in pixels (positive even integer)')
+    parser.add_argument('--height', type=int, default=720, help='Common panel height for horizontal layout (positive even integer)')
+    parser.add_argument('--width', type=int, default=720, help='Common panel width for vertical layout (positive even integer)')
+    parser.add_argument('--layout', choices=['horizontal', 'vertical'], default='horizontal', help='Video arrangement')
     parser.add_argument('--fps', type=positive_float, default=30.0, help='Output frames per second')
     parser.add_argument('--audio', choices=['first', 'mix', 'none'], default='first', help='Output audio source')
     parser.add_argument('--duration', type=positive_float, help='Limit rendered duration in seconds')
@@ -375,6 +381,8 @@ def main(argv=None):
         parser.error('Provide 2–4 input videos.')
     if args.height < 2 or args.height % 2:
         parser.error('--height must be a positive even integer.')
+    if args.width < 2 or args.width % 2:
+        parser.error('--width must be a positive even integer.')
     automatic = args.frequency == 'auto'
     if automatic and args.tolerance >= 1200:
         parser.error('Automatic detection requires --tolerance below 1200 Hz.')
@@ -418,7 +426,7 @@ def main(argv=None):
         if not args.detect_only:
             render(ffmpeg, args.inputs, beeps, args.output, pre_roll=args.pre_roll,
                    height=args.height, fps=args.fps, audio=args.audio,
-                   duration=args.duration, overwrite=args.overwrite)
+                   duration=args.duration, overwrite=args.overwrite, layout=args.layout, width=args.width)
             print(f'Saved {args.output.resolve()}', flush=True)
         return 0
     except (ValueError, OSError) as exc:

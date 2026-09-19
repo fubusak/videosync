@@ -40,6 +40,7 @@ class SyncOptions:
     fps: float = 30.0
     search_seconds: float = 30.0
     timeout_seconds: float = 600.0
+    layout: str = "horizontal"
 
 
 @dataclass(frozen=True)
@@ -97,6 +98,8 @@ def build_command(script_path: Path, inputs, output: Path, options: SyncOptions)
         str(options.frequency),
         "--audio",
         options.audio,
+        "--layout",
+        options.layout,
         "--pre-roll",
         str(options.pre_roll),
         "--search-seconds",

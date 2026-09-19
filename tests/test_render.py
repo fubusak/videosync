@@ -88,6 +88,35 @@ class RenderTests(unittest.TestCase):
                     self.assertTrue(np.all(after[45, short_x] < 10))
                     self.assertGreater(after[45, long_x, 1], 100)
 
+    def test_vertical_layout_preserves_order_and_alignment(self):
+        import imageio_ffmpeg
+        for count in (2, 3, 4):
+            with self.subTest(count=count):
+                output = self.root / f'vertical-{count}.mp4'
+                result = self.cli(self.inputs[:count], '-o', output,
+                                  '--layout', 'vertical', '--width', '160', '--audio', 'mix')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                frames = imageio_ffmpeg.read_frames(str(output))
+                metadata = next(frames)
+                frames.close()
+                self.assertEqual(metadata['size'], (160, 90 * count))
+                self.assertAlmostEqual(metadata['duration'], 3.6, delta=.1)
+                def frame_at(time):
+                    raw = subprocess.run([self.ffmpeg, '-v', 'error', '-ss', str(time),
+                                          '-i', str(output), '-frames:v', '1', '-f',
+                                          'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1'],
+                                         check=True, capture_output=True)
+                    return np.frombuffer(raw.stdout, np.uint8).reshape(90 * count, 160, 3)
+                before = frame_at(.8)
+                for index, color in enumerate([(253, 0, 0), (0, 127, 0),
+                                                (0, 0, 254), (253, 253, 0)][:count]):
+                    np.testing.assert_allclose(before[index * 90 + 45, 80], color, atol=8)
+                aligned = frame_at(1.08)
+                for index in range(count):
+                    self.assertTrue(np.all(aligned[index * 90 + 45, 80] > 225))
+                samples = decode_audio(self.ffmpeg, output, 5, 16000)
+                self.assertAlmostEqual(detect_beep(samples, 16000), 1, delta=.025)
+
     def test_duration_limit_still_caps_longest_video(self):
         for limit in (2, 3.3, 5):
             with self.subTest(limit=limit):

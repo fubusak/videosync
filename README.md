@@ -1,6 +1,6 @@
 # VideoSync
 
-Synchronize **2–4 videos using a beep**, then render them horizontally in input
+Synchronize **2–4 videos using a beep**, then render them horizontally or vertically in input
 order. The recordings can show entirely different events, but the batch is
 assumed to use the **same kind of starting beep: similar frequency and duration**.
 The CLI selects a consistent beep across all inputs and places its detected
@@ -44,7 +44,8 @@ docker run --rm -p 8501:8501 -e VIDEOSYNC_PASSWORD=change-me videosync-web:dev
 Then open `http://localhost:8501` and sign in with the configured password.
 Choose one MP4 or MOV clip in each numbered upload field. Video 1 and Video 2
 are required; Video 3 and Video 4 are optional. The numbers determine the
-left-to-right output order, so mobile users can select clips individually.
+output order, so mobile users can select clips individually. Choose **Side by side**
+(left to right, the default) or **One below another** (top to bottom) under **Video layout**.
 Choose the audio source
 and automatic or known beep frequency, then select **Sync videos**. The app
 provides an MP4 preview and download after rendering.
@@ -94,6 +95,8 @@ beeps. `--detect-only` performs this same batch check without rendering.
 | `--min-beep-duration` | `0.05` | Required sustained tone duration in seconds |
 | `--audio` | `first` | First recording, `mix` all recordings, or `none` |
 | `--height` | `720` | Common video height; positive even number |
+| `--width` | `720` | Common video width for vertical layout; positive even number |
+| `--layout` | `horizontal` | `horizontal` (side by side) or `vertical` (one below another) |
 | `--fps` | `30` | Output frame rate |
 | `--duration` | longest aligned video | Limit output length, useful for previews |
 | `--detect-only` | off | Print beep and trim/padding times without rendering |
@@ -103,7 +106,9 @@ beeps. `--detect-only` performs this same batch check without rendering.
 All inputs must contain a video and an audio stream, even in silent-output
 mode: the audio is needed for detection. Output is H.264/AAC MP4 (no audio
 stream with `--audio none`). Video aspect ratios are preserved at a common
-height. Output width is the sum of the scaled video widths.
+height in horizontal layout. Output width is the sum of the scaled video widths.
+Vertical layout preserves aspect ratios at a common width; output height is the
+sum of the scaled video heights. For example, add `--layout vertical --width 720`.
 
 When a beep occurs before the requested pre-roll, the CLI adds a frozen first
 frame and silence. It runs until the longest aligned video ends, turning each

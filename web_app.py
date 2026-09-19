@@ -44,7 +44,10 @@ def _render_shell():
     st.caption("Private beta")
     st.info("Upload 2-4 MP4 or MOV clips with the same starting beep. Keep this page open while rendering; results expire after one hour.")
 
-    st.caption("Choose one clip per field. Video numbers set the left-to-right output order.")
+    layout_label = st.radio("Video layout", ["Side by side", "One below another"], horizontal=True)
+    layout = "horizontal" if layout_label == "Side by side" else "vertical"
+    order = "left-to-right" if layout == "horizontal" else "top-to-bottom"
+    st.caption(f"Choose one clip per field. Video numbers set the {order} output order.")
     slots = [
         st.file_uploader(
             f"Video {index}" + (" (optional)" if index > 2 else ""),
@@ -70,14 +73,14 @@ def _render_shell():
     if not ready:
         st.caption("Add Video 1 and Video 2 to start syncing.")
     if st.button("Sync videos", type="primary", disabled=not ready):
-        _run_sync(uploads, AUDIO_CHOICES[audio_label], frequency)
+        _run_sync(uploads, AUDIO_CHOICES[audio_label], frequency, layout)
 
     _render_result()
 
 
-def _run_sync(uploads, audio, frequency):
+def _run_sync(uploads, audio, frequency, layout="horizontal"):
     videos = [web_jobs.UploadedVideo(upload.name, upload.getvalue()) for upload in uploads]
-    options = web_jobs.SyncOptions(audio=audio, frequency=frequency)
+    options = web_jobs.SyncOptions(audio=audio, frequency=frequency, layout=layout)
     try:
         with st.spinner("Analyzing beeps and rendering..."):
             result = web_jobs.run_sync_job(videos, options)
